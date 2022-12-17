@@ -1,0 +1,423 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+var ServentWSAdddress = fmt.Sprintf("localhost:%v", PORT)
+var client *mongo.Client
+var storageCapacityColl *mongo.Collection
+var uploadedFilesColl *mongo.Collection
+
+var RouteCommands map[string]func(http.ResponseWriter, *http.Request) = make(map[string]func(http.ResponseWriter, *http.Request))
+
+// CreateCommandAction creates an action to be executed when a path is requested
+func CreateCommandAction(path string, action func(http.ResponseWriter, *http.Request)) {
+	if path != "" && action != nil {
+		RouteCommands[path] = action
+	}
+}
+
+// StartServer starts the server
+func StartServer() {
+	if c, err := InstantiateMongoDB(); err != nil {
+		panic(err)
+	} else {
+		client = c
+		storageCapacityColl = client.Database(DB_NAME).Collection(STORAGE_CAPACITY_COLL_NAME)
+		uploadedFilesColl = client.Database(DB_NAME).Collection(UPLOADED_FILES_COLL_NAME)
+		defer func() {
+			if err := client.Disconnect(context.TODO()); err != nil {
+				panic(err)
+			}
+		}()
+	}
+
+	println("Server started on port", PORT)
+
+	CreateCommandAction("/init", initialiseStorageStateHandler)
+
+	// Routes for getting the total AWS and storage pool size
+	CreateCommandAction("/size/aws", getAwsStorageSizeHandler)
+	CreateCommandAction("/size/spool", getTotalStoragePoolSizeHandler)
+
+	// Routes for getting the total AWS and storage pool used (GET)
+	// and incrementing the total AWS and storage pool used (POST request)
+	CreateCommandAction("/used/aws", getAwsStorageUsedHandler)
+	CreateCommandAction("/used/spool", getStoragePoolUsedHandler)
+
+	// Route for instructing the node how to store the file
+	CreateCommandAction("/store", storeFileHandler)
+
+	// Route to record the uploaded file
+	CreateCommandAction("/record", recordFileHandler)
+
+	// Route to increment the total AWS and storage pool size
+	CreateCommandAction("/inc/aws", incrementAwsStorageSizeHandler)
+	CreateCommandAction("/inc/spool", incrementStoragePoolSizeHandler)
+
+	for path, action := range RouteCommands {
+		http.HandleFunc(path, action)
+	}
+
+	// Listens for incoming connections and runs their handler
+	if err := http.ListenAndServe(ServentWSAdddress, nil); err != nil {
+		log.Fatal(err.Error())
+	}
+}
+
+func initialiseStorageStateHandler(w http.ResponseWriter, r *http.Request) {
+	InitialiseNetworkState()
+}
+
+// getTotalStoragePoolSizeHandler returns the total storage pool size
+func getTotalStoragePoolSizeHandler(w http.ResponseWriter, r *http.Request) {
+	if totalStoragePoolSize, err := GetTotalStoragePoolSize(); err != nil {
+		SendResponse(w, false, err.Error(), nil)
+	} else {
+		SendResponse(w, true, "Total storage pool size", totalStoragePoolSize)
+	}
+}
+
+// incrementAwsStorageSizeHandler increments the total AWS storage size
+func incrementAwsStorageSizeHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	if r.FormValue("amount") == "" {
+		SendResponse(w, false, "amount form key not provided", nil)
+		return
+	}
+
+	newAwsStorage, _ := strconv.Atoi(r.FormValue("amount"))
+
+	if ok, err := IncrementTotalAwsStorageSize(int64(newAwsStorage)); err != nil {
+		SendResponse(w, false, err.Error(), nil)
+	} else {
+		if ok {
+			SendResponse(w, true, "AWS storage incremented", nil)
+		} else {
+			SendResponse(w, false, "AWS storage not incremented", nil)
+		}
+	}
+}
+
+func incrementStoragePoolSizeHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	if r.FormValue("amount") == "" {
+		SendResponse(w, false, "amount form key not provided", nil)
+		return
+	}
+
+	newStoragePool, _ := strconv.Atoi(r.FormValue("amount"))
+
+	if ok, err := IncrementTotalStoragePoolSize(int64(newStoragePool)); err != nil {
+		SendResponse(w, false, err.Error(), nil)
+	} else {
+		if ok {
+			SendResponse(w, true, "Storage pool incremented", nil)
+		} else {
+			SendResponse(w, false, "Storage pool not incremented", nil)
+		}
+	}
+}
+
+// recordFileHandler is called after a file has been uploaded. It records the file
+// in the database.
+func recordFileHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	fileName := r.FormValue("file_name")
+	fileSize, _ := strconv.Atoi(r.FormValue("file_size"))
+	uploadDate, _ := strconv.Atoi(r.FormValue("upload_date"))
+	inStoragePool := r.FormValue("in_storage_pool")
+	hosts := r.FormValue("hosts")
+	shards := r.FormValue("shards")
+	uploaderAddress := r.FormValue("uploader_address")
+	backupShards := r.FormValue("backup_shards")
+	isMonthlySub := r.FormValue("is_monthly_sub")
+	timezone := r.FormValue("timezone")
+
+	if fileName == "" || fileSize == 0 || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
+		SendResponse(w, false, "Invalid parameters", nil)
+		return
+	}
+
+	// Convert the hosts string to a 2D string array
+	var hosts2D [][]string
+	if err := json.Unmarshal([]byte(hosts), &hosts2D); err != nil {
+		SendResponse(w, false, err.Error(), nil)
+		return
+	}
+
+	// Convert the inStoragePool string to a boolean
+	var inStoragePoolBool bool
+	if inStoragePool == "true" {
+		inStoragePoolBool = true
+	} else {
+		inStoragePoolBool = false
+	}
+
+	// Convert the shards string to an int
+	var shardsInt int
+	if shards == "" {
+		shardsInt = 0
+	} else {
+		shardsInt, _ = strconv.Atoi(shards)
+	}
+
+	// Convert the backupShards string to an int
+	var backupShardsInt int
+	if backupShards == "" {
+		backupShardsInt = 0
+	} else {
+		backupShardsInt, _ = strconv.Atoi(backupShards)
+	}
+
+	// Convert the isMonthlySub string to a boolean
+	var isMonthlySubBool bool
+	if isMonthlySub == "true" {
+		isMonthlySubBool = true
+	} else {
+		isMonthlySubBool = false
+	}
+
+	uploadedFile := UploadedFile{
+		FileName:        fileName,
+		FileSize:        int64(fileSize),
+		UploadDate:      uploadDate,
+		InStoragePool:   inStoragePoolBool,
+		Hosts:           hosts2D,
+		Shards:          shardsInt,
+		UploaderAddress: uploaderAddress,
+		BackupShards:    backupShardsInt,
+		IsMonthlySub:    isMonthlySubBool,
+		Timezone:        timezone,
+	}
+
+	if inStoragePoolBool {
+		// Increment the storage pool used
+		if ok, err := updateStoragePoolUsed(int64(fileSize)); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			if ok {
+				if err := InsertUploadedFile(uploadedFile); err != nil {
+					SendResponse(w, false, err.Error(), nil)
+				} else {
+					SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+				}
+			} else {
+				SendResponse(w, false, "Storage pool full", nil)
+			}
+		}
+	} else {
+		// Increment the AWS used
+		if ok, err := updateStoragePoolUsed(int64(fileSize)); err != nil {
+			println(err.Error())
+		} else {
+			if ok {
+				if err := InsertUploadedFile(uploadedFile); err != nil {
+					SendResponse(w, false, err.Error(), nil)
+				} else {
+					SendResponse(w, true, "AWS use incremented and File recorded", nil)
+				}
+			} else {
+				SendResponse(w, false, "AWS storage full", nil)
+			}
+		}
+	}
+
+}
+
+// storeFileHandler is called before a file is to be uploaded. It tells the node
+// where to store the file and if they can store it.
+//
+// If the user is a monthly subscriber, then they should be told to store their file
+// in AWS except in situations where the storage pool can satisfy all the Fixed Amount
+// customers, in that case their file would be stored in the storage pool.
+// If the user is a Fixed Amount customer, then they should be told to store their file
+// in the storage pool except in situations where the storage pool is full, in that case
+// their file would be stored in AWS.
+func storeFileHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	if r.FormValue("file_size_gb") == "" {
+		SendResponse(w, false, "file_size_gb form key not specified", nil)
+		return
+	}
+
+	if r.FormValue("account_type") == "" {
+		SendResponse(w, false, "account_type form key not specified", nil)
+		return
+	}
+
+	fileSizeGB, _ := strconv.Atoi(r.FormValue("file_size_gb"))
+	accountType := r.FormValue("account_type")
+
+	totalStoragePoolSize, err := GetTotalStoragePoolSize()
+	if err != nil {
+		SendResponse(w, false, err.Error(), nil)
+	}
+
+	if accountType == "monthly" {
+		// Check if the storage pool can satisfy the file
+		numberOfFixedAmounts1, err := GetNumberOfFixedAmount1Subs()
+		if err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		}
+
+		numberOfFixedAmounts2, err := GetNumberOfFixedAmount2Subs()
+		if err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		}
+
+		if numberOfFixedAmounts1*1000 >= totalStoragePoolSize+int64(fileSizeGB) {
+			// Storage pool cannot satisfy the file
+			SendResponse(w, true, "location", "aws")
+		} else if numberOfFixedAmounts2*2000 >= totalStoragePoolSize+int64(fileSizeGB) {
+			// Storage pool cannot satisfy the file
+			SendResponse(w, true, "location", "aws")
+		} else {
+			// Storage pool can satisfy the file
+			SendResponse(w, true, "location", "spool")
+		}
+	} else if accountType == "fixed1" {
+		// Check if the storage pool can satisfy the file
+		if int64(fileSizeGB) < totalStoragePoolSize {
+			// Storage pool can satisfy the file
+			SendResponse(w, true, "location", "spool")
+		} else {
+			// Storage pool cannot satisfy the file
+			SendResponse(w, true, "location", "aws")
+		}
+	} else if accountType == "fixed2" {
+		// Check if the storage pool can satisfy the file
+		if int64(fileSizeGB) < totalStoragePoolSize {
+			// Storage pool can satisfy the file
+			SendResponse(w, true, "location", "spool")
+		} else {
+			// Storage pool cannot satisfy the file
+			SendResponse(w, true, "location", "aws")
+		}
+	} else {
+		SendResponse(w, false, fmt.Sprintf("Invalid account type [%v]", accountType), nil)
+	}
+}
+
+// getStoragePoolUsedHandler handles sending the total storage pool used when a GET request is made
+// and handles incrementing the total storage pool used when a POST request is made
+func getStoragePoolUsedHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET": // Get storage pool used
+		storagePoolUsed, err := GetStoragePoolUsed()
+		if err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			SendResponse(w, true, "Total storage pool used", storagePoolUsed)
+		}
+
+	case "POST": // Increment storage pool used
+		r.ParseForm()
+		size, _ := strconv.Atoi(r.FormValue("size"))
+
+		// Ensure that the storage pool is not full
+		if ok, err := updateStoragePoolUsed(int64(size)); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			if ok {
+				SendResponse(w, true, "Storage pool used incremented", nil)
+			} else {
+				SendResponse(w, false, "Storage pool is full", nil)
+			}
+		}
+	}
+}
+
+func updateStoragePoolUsed(fileSize int64) (bool, error) {
+	// Update the storage pool used
+	storagePoolAvailable, err := GetTotalStoragePoolSize()
+	if err != nil {
+		return false, err
+	}
+
+	totalStoragePoolUsed, err := GetStoragePoolUsed()
+	if err != nil {
+		return false, err
+	}
+
+	if storagePoolAvailable-totalStoragePoolUsed <= int64(fileSize) {
+		fmt.Println("Storage pool is full")
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func getAwsStorageSizeHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		SendResponse(w, true, "Total AWS storage size", GetTotalAwsStorageSize())
+
+	case "POST":
+		r.ParseForm()
+		size, _ := strconv.Atoi(r.FormValue("size"))
+
+		if success, err := IncrementAwsStorageUsed(int64(size)); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			totalAwsUsed, err := GetTotalAwsStorageUsed()
+			if err != nil {
+				SendResponse(w, false, err.Error(), nil)
+			}
+
+			SendResponse(w, success, "Total AWS storage used", totalAwsUsed)
+		}
+
+	default:
+		fmt.Println("Invalid request method")
+	}
+}
+
+func getAwsStorageUsedHandler(w http.ResponseWriter, r *http.Request) {
+	totalAwsStorageUsed, err := GetTotalAwsStorageUsed()
+	if err != nil {
+		SendResponse(w, false, err.Error(), nil)
+	}
+
+	SendResponse(w, true, "Total AWS storage used", totalAwsStorageUsed)
+}
+
+// SendResponse sends a response to the requester
+func SendResponse(w http.ResponseWriter, success bool, message string, value interface{}) {
+	response := Response{
+		Message: message,
+		Data:    value,
+		Success: success,
+	}
+
+	jsonData, err := json.MarshalIndent(response, "", "    ")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Fprint(w, string(jsonData))
+}
+
+func InstantiateMongoDB() (*mongo.Client, error) {
+	uri := "mongodb+srv://admin:eromosele1234@shr.nsdaozg.mongodb.net/?retryWrites=true&w=majority"
+
+	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(uri))
+	if err != nil {
+		panic(err)
+	}
+
+	return client, err
+}
