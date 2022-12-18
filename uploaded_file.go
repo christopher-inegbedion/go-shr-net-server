@@ -2,7 +2,7 @@ package main
 
 type UploadedFile struct {
 	FileName        string     `json:"file_name"`
-	FileSize        int64      `json:"file_size"`   // in gigabytes
+	FileSize        float64      `json:"file_size"`   // in gigabytes
 	UploadDate      int        `json:"upload_date"` // in unix time
 	InStoragePool   bool       `json:"in_storage_pool"`
 	Hosts           [][]string `json:"hosts"`

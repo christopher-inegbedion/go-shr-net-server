@@ -16,6 +16,7 @@ var ServentWSAdddress = fmt.Sprintf("localhost:%v", PORT)
 var client *mongo.Client
 var storageCapacityColl *mongo.Collection
 var uploadedFilesColl *mongo.Collection
+var userDetailsColl *mongo.Collection
 
 var RouteCommands map[string]func(http.ResponseWriter, *http.Request) = make(map[string]func(http.ResponseWriter, *http.Request))
 
@@ -34,6 +35,8 @@ func StartServer() {
 		client = c
 		storageCapacityColl = client.Database(DB_NAME).Collection(STORAGE_CAPACITY_COLL_NAME)
 		uploadedFilesColl = client.Database(DB_NAME).Collection(UPLOADED_FILES_COLL_NAME)
+		userDetailsColl = client.Database(DB_NAME).Collection(USER_DETAILS_COLL_NAME)
+
 		defer func() {
 			if err := client.Disconnect(context.TODO()); err != nil {
 				panic(err)
@@ -64,6 +67,9 @@ func StartServer() {
 	CreateCommandAction("/inc/aws", incrementAwsStorageSizeHandler)
 	CreateCommandAction("/inc/spool", incrementStoragePoolSizeHandler)
 
+	// Route to manage the users
+	CreateCommandAction("/user", manageUserHandler)
+
 	for path, action := range RouteCommands {
 		http.HandleFunc(path, action)
 	}
@@ -76,6 +82,112 @@ func StartServer() {
 
 func initialiseStorageStateHandler(w http.ResponseWriter, r *http.Request) {
 	InitialiseNetworkState()
+}
+
+// manageUserHandler manages the users
+func manageUserHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	switch r.Method {
+	case "GET":
+		if r.FormValue("address") == "" {
+			SendResponse(w, false, "address form key not provided", nil)
+			return
+		}
+
+		if user, err := GetUserByAddress(r.FormValue("address")); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			SendResponse(w, true, "User details", user)
+		}
+
+	case "PUT":
+		address := r.FormValue("address")
+		fieldName := r.FormValue("field_name")
+		fieldValue := r.FormValue("field_value")
+
+		if address == "" || fieldName == "" || fieldValue == "" {
+			SendResponse(w, false, "Invalid parameters", nil)
+			return
+		}
+
+		var value interface{}
+		value = fieldValue
+
+		if fieldName == "spool_capacity_used" || fieldName == "aws_capacity_used" {
+			value, _ = strconv.Atoi(fieldValue)
+			value = int64(value.(int))
+		}
+
+		if fieldName == "num_files_uploaded" {
+			value, _ = strconv.Atoi(fieldValue)
+			value = int(value.(int))
+		}
+
+		if ok, err := UpdateUser(fieldName, value, address); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			if ok {
+				SendResponse(w, true, "User field updated", nil)
+			} else {
+				SendResponse(w, false, "User field failed", nil)
+			}
+		}
+
+	case "POST":
+		address := r.FormValue("address")
+		userName := r.FormValue("user_name")
+		timezone := r.FormValue("timezone")
+		accountType := r.FormValue("account_type")
+		spoolCapacityUsed, _ := strconv.Atoi(r.FormValue("spool_capacity_used"))
+		awsCapacityUsed, _ := strconv.Atoi(r.FormValue("aws_capacity_used"))
+		numFilesUploaded, _ := strconv.Atoi(r.FormValue("num_files_uploaded"))
+
+		if address == "" || userName == "" || timezone == "" || accountType == "" {
+			SendResponse(w, false, "Invalid parameters", nil)
+			return
+		}
+
+		if accountType != MONTHLY_SUB && accountType != FIXED_AMOUNT_1 && accountType != FIXED_AMOUNT_2 {
+			SendResponse(w, false, fmt.Sprintf("Invalid account type [%v]", accountType), nil)
+			return
+		}
+
+		user := User{
+			Address:           address,
+			UserName:          userName,
+			Timezone:          timezone,
+			AccountType:       accountType,
+			SpoolCapacityUsed: float64(spoolCapacityUsed),
+			AwsCapacityUsed:   float64(awsCapacityUsed),
+			NumFilesUploaded:  numFilesUploaded,
+		}
+
+		if ok, err := InsertUser(user); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			if ok {
+				SendResponse(w, true, "User added", nil)
+			} else {
+				SendResponse(w, false, "User not inserted", nil)
+			}
+		}
+	case "DELETE":
+		if r.FormValue("address") == "" {
+			SendResponse(w, false, "address form key not provided", nil)
+			return
+		}
+
+		if ok, err := DeleteUser(r.FormValue("address")); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			if ok {
+				SendResponse(w, true, "User deleted", nil)
+			} else {
+				SendResponse(w, false, "User not deleted", nil)
+			}
+		}
+	}
 }
 
 // getTotalStoragePoolSizeHandler returns the total storage pool size
@@ -98,7 +210,7 @@ func incrementAwsStorageSizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	newAwsStorage, _ := strconv.Atoi(r.FormValue("amount"))
 
-	if ok, err := IncrementTotalAwsStorageSize(int64(newAwsStorage)); err != nil {
+	if ok, err := IncrementTotalAwsStorageSize(float64(newAwsStorage)); err != nil {
 		SendResponse(w, false, err.Error(), nil)
 	} else {
 		if ok {
@@ -119,7 +231,7 @@ func incrementStoragePoolSizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	newStoragePool, _ := strconv.Atoi(r.FormValue("amount"))
 
-	if ok, err := IncrementTotalStoragePoolSize(int64(newStoragePool)); err != nil {
+	if ok, err := IncrementTotalStoragePoolSize(float64(newStoragePool)); err != nil {
 		SendResponse(w, false, err.Error(), nil)
 	} else {
 		if ok {
@@ -135,6 +247,7 @@ func incrementStoragePoolSizeHandler(w http.ResponseWriter, r *http.Request) {
 func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
+	address := r.FormValue("address")
 	fileName := r.FormValue("file_name")
 	fileSize, _ := strconv.Atoi(r.FormValue("file_size"))
 	uploadDate, _ := strconv.Atoi(r.FormValue("upload_date"))
@@ -146,8 +259,14 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 	isMonthlySub := r.FormValue("is_monthly_sub")
 	timezone := r.FormValue("timezone")
 
-	if fileName == "" || fileSize == 0 || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
+	if address == "" || fileName == "" || fileSize == 0 || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
 		SendResponse(w, false, "Invalid parameters", nil)
+		return
+	}
+
+	// Check if the user exists
+	if _, err := GetUserByAddress(address); err != nil {
+		SendResponse(w, false, err.Error(), nil)
 		return
 	}
 
@@ -192,7 +311,7 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	uploadedFile := UploadedFile{
 		FileName:        fileName,
-		FileSize:        int64(fileSize),
+		FileSize:        float64(fileSize),
 		UploadDate:      uploadDate,
 		InStoragePool:   inStoragePoolBool,
 		Hosts:           hosts2D,
@@ -205,14 +324,22 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	if inStoragePoolBool {
 		// Increment the storage pool used
-		if ok, err := updateStoragePoolUsed(int64(fileSize)); err != nil {
+		if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
 			if ok {
 				if err := InsertUploadedFile(uploadedFile); err != nil {
 					SendResponse(w, false, err.Error(), nil)
 				} else {
-					SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+					if ok, err := UpdateUser("number_of_files", 1, address); err != nil {
+						SendResponse(w, false, err.Error(), nil)
+					} else {
+						if ok {
+							SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+						} else {
+							SendResponse(w, false, "error uploading file", nil)
+						}
+					}
 				}
 			} else {
 				SendResponse(w, false, "Storage pool full", nil)
@@ -220,14 +347,22 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// Increment the AWS used
-		if ok, err := updateStoragePoolUsed(int64(fileSize)); err != nil {
+		if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
 			println(err.Error())
 		} else {
 			if ok {
 				if err := InsertUploadedFile(uploadedFile); err != nil {
 					SendResponse(w, false, err.Error(), nil)
 				} else {
-					SendResponse(w, true, "AWS use incremented and File recorded", nil)
+					if ok, err := UpdateUser("number_of_files", 1, address); err != nil {
+						SendResponse(w, false, err.Error(), nil)
+					} else {
+						if ok {
+							SendResponse(w, true, "AWS use incremented and File recorded", nil)
+						} else {
+							SendResponse(w, false, "error uploading file", nil)
+						}
+					}
 				}
 			} else {
 				SendResponse(w, false, "AWS storage full", nil)
@@ -279,10 +414,10 @@ func storeFileHandler(w http.ResponseWriter, r *http.Request) {
 			SendResponse(w, false, err.Error(), nil)
 		}
 
-		if numberOfFixedAmounts1*1000 >= totalStoragePoolSize+int64(fileSizeGB) {
+		if float64(numberOfFixedAmounts1*1000) >= totalStoragePoolSize+float64(fileSizeGB) {
 			// Storage pool cannot satisfy the file
 			SendResponse(w, true, "location", "aws")
-		} else if numberOfFixedAmounts2*2000 >= totalStoragePoolSize+int64(fileSizeGB) {
+		} else if float64(numberOfFixedAmounts2*2000) >= totalStoragePoolSize+float64(fileSizeGB) {
 			// Storage pool cannot satisfy the file
 			SendResponse(w, true, "location", "aws")
 		} else {
@@ -291,7 +426,7 @@ func storeFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if accountType == "fixed1" {
 		// Check if the storage pool can satisfy the file
-		if int64(fileSizeGB) < totalStoragePoolSize {
+		if float64(fileSizeGB) < totalStoragePoolSize {
 			// Storage pool can satisfy the file
 			SendResponse(w, true, "location", "spool")
 		} else {
@@ -300,7 +435,7 @@ func storeFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if accountType == "fixed2" {
 		// Check if the storage pool can satisfy the file
-		if int64(fileSizeGB) < totalStoragePoolSize {
+		if float64(fileSizeGB) < totalStoragePoolSize {
 			// Storage pool can satisfy the file
 			SendResponse(w, true, "location", "spool")
 		} else {
@@ -329,7 +464,7 @@ func getStoragePoolUsedHandler(w http.ResponseWriter, r *http.Request) {
 		size, _ := strconv.Atoi(r.FormValue("size"))
 
 		// Ensure that the storage pool is not full
-		if ok, err := updateStoragePoolUsed(int64(size)); err != nil {
+		if ok, err := updateStoragePoolUsed(float64(size)); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
 			if ok {
@@ -341,7 +476,7 @@ func getStoragePoolUsedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func updateStoragePoolUsed(fileSize int64) (bool, error) {
+func updateStoragePoolUsed(fileSize float64) (bool, error) {
 	// Update the storage pool used
 	storagePoolAvailable, err := GetTotalStoragePoolSize()
 	if err != nil {
@@ -353,9 +488,18 @@ func updateStoragePoolUsed(fileSize int64) (bool, error) {
 		return false, err
 	}
 
-	if storagePoolAvailable-totalStoragePoolUsed <= int64(fileSize) {
+	if storagePoolAvailable-totalStoragePoolUsed <= float64(fileSize) {
 		fmt.Println("Storage pool is full")
 		return false, nil
+	}
+
+	// Increment the storage pool used
+	if ok, err := IncrementStoragePoolUsed(float64(fileSize)); err != nil {
+		return false, err
+	} else {
+		if !ok {
+			return false, fmt.Errorf("failed to increment storage pool used")
+		}
 	}
 
 	return true, nil
@@ -370,7 +514,7 @@ func getAwsStorageSizeHandler(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		size, _ := strconv.Atoi(r.FormValue("size"))
 
-		if success, err := IncrementAwsStorageUsed(int64(size)); err != nil {
+		if success, err := IncrementAwsStorageUsed(float64(size)); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
 			totalAwsUsed, err := GetTotalAwsStorageUsed()

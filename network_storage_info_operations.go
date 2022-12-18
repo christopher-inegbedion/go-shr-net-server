@@ -72,7 +72,7 @@ func GetNetworkStorageState() NetworkStorageState {
 }
 
 // SetTotalAwsStorageSize sets the total AWS storage size in the network.
-func IncrementTotalAwsStorageSize(size int64) (bool, error) {
+func IncrementTotalAwsStorageSize(size float64) (bool, error) {
 	update := bson.D{
 		{Key: "$inc", Value: bson.D{
 			{Key: "total_aws_storage_size", Value: size},
@@ -87,8 +87,38 @@ func IncrementTotalAwsStorageSize(size int64) (bool, error) {
 	return true, err
 }
 
-// SetTotalStoragePoolSize sets the total storage pool size in the network.
-func IncrementTotalStoragePoolSize(size int64) (bool, error) {
+func DecrementTotalAwsStorageSize(size float64) (bool, error) {
+	update := bson.D{
+		{Key: "$inc", Value: bson.D{
+			{Key: "total_aws_storage_size", Value: -size},
+		}},
+	}
+
+	_, err := storageCapacityColl.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
+}
+
+func DecrementAwsStorageUsed(size float64) (bool, error) {
+	update := bson.D{
+		{Key: "$inc", Value: bson.D{
+			{Key: "total_aws_storage_used", Value: -size},
+		}},
+	}
+
+	_, err := storageCapacityColl.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
+}
+
+// IncrementTotalStoragePoolSize incrementes the total storage pool size in the network.
+func IncrementTotalStoragePoolSize(size float64) (bool, error) {
 	update := bson.D{
 		{Key: "$inc", Value: bson.D{
 			{Key: "total_storage_pool_size", Value: size},
@@ -103,8 +133,38 @@ func IncrementTotalStoragePoolSize(size int64) (bool, error) {
 	return true, err
 }
 
+func DecrementTotalStoragePoolSize(size float64) (bool, error) {
+	update := bson.D{
+		{Key: "$inc", Value: bson.D{
+			{Key: "total_storage_pool_size", Value: -size},
+		}},
+	}
+
+	_, err := storageCapacityColl.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
+}
+
+func DecrementStoragePoolUsed(size float64) (bool, error) {
+	update := bson.D{
+		{Key: "$inc", Value: bson.D{
+			{Key: "total_storage_pool_used", Value: -size},
+		}},
+	}
+
+	_, err := storageCapacityColl.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return false, err
+	}
+
+	return true, err
+}
+
 // IncrementStoragePoolUsed incrementes the storage pool capacity used in the network.
-func IncrementStoragePoolUsed(increment int64) (bool, error) {
+func IncrementStoragePoolUsed(increment float64) (bool, error) {
 	update := bson.D{
 		{Key: "$inc", Value: bson.D{
 			{Key: "total_storage_pool_used", Value: increment},
@@ -120,7 +180,7 @@ func IncrementStoragePoolUsed(increment int64) (bool, error) {
 }
 
 // IncrementAwsStorageUsed incrementes the total AWS storage used in the network.
-func IncrementAwsStorageUsed(increment int64) (bool, error) {
+func IncrementAwsStorageUsed(increment float64) (bool, error) {
 	update := bson.D{
 		{Key: "$inc", Value: bson.D{
 			{Key: "total_aws_storage_used", Value: increment},
@@ -136,7 +196,7 @@ func IncrementAwsStorageUsed(increment int64) (bool, error) {
 }
 
 // GetStoragePoolUsed returns the total storage pool used in the network.
-func GetStoragePoolUsed() (int64, error) {
+func GetStoragePoolUsed() (float64, error) {
 	var result NetworkStorageState
 	err := findNetworkStateInMongo(&result)
 
@@ -151,7 +211,7 @@ func GetStoragePoolUsed() (int64, error) {
 }
 
 // GetTotalAwsStorageUsed returns the total AWS storage used in the network.
-func GetTotalAwsStorageUsed() (int64, error) {
+func GetTotalAwsStorageUsed() (float64, error) {
 	var result NetworkStorageState
 	err := findNetworkStateInMongo(&result)
 
@@ -166,7 +226,7 @@ func GetTotalAwsStorageUsed() (int64, error) {
 }
 
 // GetTotalStoragePoolSize returns the total storage pool size in the network.
-func GetTotalStoragePoolSize() (int64, error) {
+func GetTotalStoragePoolSize() (float64, error) {
 	var result NetworkStorageState
 	err := findNetworkStateInMongo(&result)
 
@@ -181,7 +241,7 @@ func GetTotalStoragePoolSize() (int64, error) {
 }
 
 // GetTotalAwsStorageSize returns the total AWS storage size in the network.
-func GetTotalAwsStorageSize() int64 {
+func GetTotalAwsStorageSize() float64 {
 	var result NetworkStorageState
 	err := findNetworkStateInMongo(&result)
 
