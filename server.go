@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var ServentWSAdddress = fmt.Sprintf("localhost:%v", PORT)
+var ServentWSAdddress = fmt.Sprintf("0.0.0.0:%v", PORT)
 var client *mongo.Client
 var storageCapacityColl *mongo.Collection
 var uploadedFilesColl *mongo.Collection
@@ -61,7 +61,7 @@ func StartServer() {
 	CreateCommandAction("/store", storeFileHandler)
 
 	// Route to record the uploaded file
-	CreateCommandAction("/record", recordFileHandler)
+	CreateCommandAction("/file", recordFileHandler)
 
 	// Route to increment the total AWS and storage pool size
 	CreateCommandAction("/inc/aws", incrementAwsStorageSizeHandler)
@@ -245,127 +245,131 @@ func incrementStoragePoolSizeHandler(w http.ResponseWriter, r *http.Request) {
 // recordFileHandler is called after a file has been uploaded. It records the file
 // in the database.
 func recordFileHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	switch r.Method {
+	case "POST":
+		r.ParseForm()
 
-	address := r.FormValue("address")
-	fileName := r.FormValue("file_name")
-	fileSize, _ := strconv.Atoi(r.FormValue("file_size"))
-	uploadDate, _ := strconv.Atoi(r.FormValue("upload_date"))
-	inStoragePool := r.FormValue("in_storage_pool")
-	hosts := r.FormValue("hosts")
-	shards := r.FormValue("shards")
-	uploaderAddress := r.FormValue("uploader_address")
-	backupShards := r.FormValue("backup_shards")
-	isMonthlySub := r.FormValue("is_monthly_sub")
-	timezone := r.FormValue("timezone")
+		fileName := r.FormValue("file_name")
+		fileSize, _ := strconv.ParseFloat(r.FormValue("file_size"), 64)
+		uploadDate, _ := strconv.Atoi(r.FormValue("upload_date"))
+		inStoragePool := r.FormValue("in_storage_pool")
+		hosts := r.FormValue("hosts")
+		shards := r.FormValue("shards")
+		uploaderAddress := r.FormValue("uploader_address")
+		backupShards := r.FormValue("backup_shards")
+		isMonthlySub := r.FormValue("is_monthly_sub")
+		timezone := r.FormValue("timezone")
 
-	if address == "" || fileName == "" || fileSize == 0 || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
-		SendResponse(w, false, "Invalid parameters", nil)
-		return
-	}
-
-	// Check if the user exists
-	if _, err := GetUserByAddress(address); err != nil {
-		SendResponse(w, false, err.Error(), nil)
-		return
-	}
-
-	// Convert the hosts string to a 2D string array
-	var hosts2D [][]string
-	if err := json.Unmarshal([]byte(hosts), &hosts2D); err != nil {
-		SendResponse(w, false, err.Error(), nil)
-		return
-	}
-
-	// Convert the inStoragePool string to a boolean
-	var inStoragePoolBool bool
-	if inStoragePool == "true" {
-		inStoragePoolBool = true
-	} else {
-		inStoragePoolBool = false
-	}
-
-	// Convert the shards string to an int
-	var shardsInt int
-	if shards == "" {
-		shardsInt = 0
-	} else {
-		shardsInt, _ = strconv.Atoi(shards)
-	}
-
-	// Convert the backupShards string to an int
-	var backupShardsInt int
-	if backupShards == "" {
-		backupShardsInt = 0
-	} else {
-		backupShardsInt, _ = strconv.Atoi(backupShards)
-	}
-
-	// Convert the isMonthlySub string to a boolean
-	var isMonthlySubBool bool
-	if isMonthlySub == "true" {
-		isMonthlySubBool = true
-	} else {
-		isMonthlySubBool = false
-	}
-
-	uploadedFile := UploadedFile{
-		FileName:        fileName,
-		FileSize:        float64(fileSize),
-		UploadDate:      uploadDate,
-		InStoragePool:   inStoragePoolBool,
-		Hosts:           hosts2D,
-		Shards:          shardsInt,
-		UploaderAddress: uploaderAddress,
-		BackupShards:    backupShardsInt,
-		IsMonthlySub:    isMonthlySubBool,
-		Timezone:        timezone,
-	}
-
-	if inStoragePoolBool {
-		// Increment the storage pool used
-		if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
-			SendResponse(w, false, err.Error(), nil)
-		} else {
-			if ok {
-				if err := InsertUploadedFile(uploadedFile); err != nil {
-					SendResponse(w, false, err.Error(), nil)
-				} else {
-					if ok, err := UpdateUser("number_of_files", 1, address); err != nil {
-						SendResponse(w, false, err.Error(), nil)
-					} else {
-						if ok {
-							SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
-						} else {
-							SendResponse(w, false, "error uploading file", nil)
-						}
-					}
-				}
-			} else {
-				SendResponse(w, false, "Storage pool full", nil)
-			}
+		if fileName == "" || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
+			SendResponse(w, false, "Invalid parameters", nil)
+			return
 		}
-	} else {
-		// Increment the AWS used
-		if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
-			println(err.Error())
+
+		// Check if the user exists
+		if _, err := GetUserByAddress(uploaderAddress); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+			panic(err)
+			return
+		}
+
+		// Convert the hosts string to a 2D string array
+		var hosts2D [][]string
+		if err := json.Unmarshal([]byte(hosts), &hosts2D); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+			panic(err)
+			return
+		}
+
+		// Convert the inStoragePool string to a boolean
+		var inStoragePoolBool bool
+		if inStoragePool == "true" {
+			inStoragePoolBool = true
 		} else {
-			if ok {
-				if err := InsertUploadedFile(uploadedFile); err != nil {
-					SendResponse(w, false, err.Error(), nil)
-				} else {
-					if ok, err := UpdateUser("number_of_files", 1, address); err != nil {
+			inStoragePoolBool = false
+		}
+
+		// Convert the shards string to an int
+		var shardsInt int
+		if shards == "" {
+			shardsInt = 0
+		} else {
+			shardsInt, _ = strconv.Atoi(shards)
+		}
+
+		// Convert the backupShards string to an int
+		var backupShardsInt int
+		if backupShards == "" {
+			backupShardsInt = 0
+		} else {
+			backupShardsInt, _ = strconv.Atoi(backupShards)
+		}
+
+		// Convert the isMonthlySub string to a boolean
+		var isMonthlySubBool bool
+		if isMonthlySub == "true" {
+			isMonthlySubBool = true
+		} else {
+			isMonthlySubBool = false
+		}
+
+		uploadedFile := UploadedFile{
+			FileName:        fileName,
+			FileSize:        float64(fileSize),
+			UploadDate:      uploadDate,
+			InStoragePool:   inStoragePoolBool,
+			Hosts:           hosts2D,
+			Shards:          shardsInt,
+			UploaderAddress: uploaderAddress,
+			BackupShards:    backupShardsInt,
+			IsMonthlySub:    isMonthlySubBool,
+			Timezone:        timezone,
+		}
+
+		if inStoragePoolBool {
+			// Increment the storage pool used
+			if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
+				SendResponse(w, false, err.Error(), nil)
+			} else {
+				if ok {
+					if err := InsertUploadedFile(uploadedFile); err != nil {
 						SendResponse(w, false, err.Error(), nil)
 					} else {
-						if ok {
-							SendResponse(w, true, "AWS use incremented and File recorded", nil)
+						if ok, err := UpdateUser("number_of_files", 1, uploaderAddress); err != nil {
+							SendResponse(w, false, err.Error(), nil)
 						} else {
-							SendResponse(w, false, "error uploading file", nil)
+							if ok {
+								SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+							} else {
+								SendResponse(w, false, "error uploading file", nil)
+							}
 						}
 					}
+				} else {
+					SendResponse(w, false, "Storage pool full", nil)
 				}
+			}
+		} else {
+			// Increment the AWS used
+			if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
+				println(err.Error())
 			} else {
-				SendResponse(w, false, "AWS storage full", nil)
+				if ok {
+					if err := InsertUploadedFile(uploadedFile); err != nil {
+						SendResponse(w, false, err.Error(), nil)
+					} else {
+						if ok, err := UpdateUser("number_of_files", 1, uploaderAddress); err != nil {
+							SendResponse(w, false, err.Error(), nil)
+						} else {
+							if ok {
+								SendResponse(w, true, "AWS use incremented and File recorded", nil)
+							} else {
+								SendResponse(w, false, "error uploading file", nil)
+							}
+						}
+					}
+				} else {
+					SendResponse(w, false, "AWS storage full", nil)
+				}
 			}
 		}
 	}
