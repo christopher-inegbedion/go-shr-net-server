@@ -90,12 +90,14 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		if r.FormValue("address") == "" {
+		queryParams := r.URL.Query()
+		address := queryParams.Get("address")
+		if address == "" {
 			SendResponse(w, false, "address form key not provided", nil)
 			return
 		}
 
-		if user, err := GetUserByAddress(r.FormValue("address")); err != nil {
+		if user, err := GetUserByAddress(address); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
 			SendResponse(w, true, "User details", user)
@@ -338,7 +340,15 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 							SendResponse(w, false, err.Error(), nil)
 						} else {
 							if ok {
-								SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+								if ok, err := UpdateUser("spool_capacity_used", float64(fileSize), uploaderAddress); err != nil {
+									SendResponse(w, false, err.Error(), nil)
+								} else {
+									if ok {
+										SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
+									} else {
+										SendResponse(w, false, "Storage pool use incremented but File not recorded", nil)
+									}
+								}
 							} else {
 								SendResponse(w, false, "error uploading file", nil)
 							}
@@ -361,8 +371,16 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 							SendResponse(w, false, err.Error(), nil)
 						} else {
 							if ok {
-								SendResponse(w, true, "AWS use incremented and File recorded", nil)
-							} else {
+
+								if ok, err := UpdateUser("aws_capacity_used", float64(fileSize), uploaderAddress); err != nil {
+									SendResponse(w, false, err.Error(), nil)
+								} else {
+									if ok {
+										SendResponse(w, true, "AWS use incremented and File recorded", nil)
+									} else {
+										SendResponse(w, false, "AWS use incremented but File not recorded", nil)
+									}
+								}							} else {
 								SendResponse(w, false, "error uploading file", nil)
 							}
 						}

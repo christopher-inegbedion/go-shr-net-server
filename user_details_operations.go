@@ -19,7 +19,7 @@ func InsertUser(user User) (bool, error) {
 		return false, err
 	} else {
 		if user.AccountType == MONTHLY_SUB {
-			if ok, err := IncrementTotalStoragePoolSize(MONTHLY_STORAGE_SIZE); err != nil {
+			if ok, err := IncrementTotalStoragePoolSize(MONTHLY_STORAGE_ALLOCATION_SIZE); err != nil {
 				return false, err
 			} else if !ok {
 				return false, fmt.Errorf("failed to increment storage pool")
@@ -97,7 +97,7 @@ func DeleteUser(address string) (bool, error) {
 			return false, err
 		} else {
 			if user.AccountType == MONTHLY_SUB {
-				if ok, err := DecrementTotalStoragePoolSize(MONTHLY_STORAGE_SIZE); err != nil {
+				if ok, err := DecrementTotalStoragePoolSize(MONTHLY_STORAGE_ALLOCATION_SIZE); err != nil {
 					return false, err
 				} else if !ok {
 					return false, fmt.Errorf("failed to increment storage pool")
