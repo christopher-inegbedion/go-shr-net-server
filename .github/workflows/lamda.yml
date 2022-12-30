@@ -29,5 +29,5 @@ jobs:
           memory_size: 128
           timeout: 10
           handler: foobar
-          role: arn:aws:iam::xxxxxxxxxxx:role/chris_ineg
+          role: arn:aws:iam::618787646995:user/chris_ineg
           runtime: nodejs12.x
