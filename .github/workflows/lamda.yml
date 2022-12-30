@@ -25,6 +25,7 @@ jobs:
           aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws_region: ${{ secrets.AWS_REGION }}
           zip_file: deployment.zip
+          function_name: StartServer
           handler: StartServer
           role: arn:aws:iam::618787646995:user/chris_ineg
           runtime: go1.x
