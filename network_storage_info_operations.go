@@ -241,18 +241,18 @@ func GetTotalStoragePoolSize() (float64, error) {
 }
 
 // GetTotalAwsStorageSize returns the total AWS storage size in the network.
-func GetTotalAwsStorageSize() float64 {
+func GetTotalAwsStorageSize() (float64, error) {
 	var result NetworkStorageState
 	err := findNetworkStateInMongo(&result)
 
 	if err == mongo.ErrNoDocuments {
-		panic("Network storage state has not been initialised")
+		return 0, fmt.Errorf("Network storage state has not been initialised")
 	}
 	if err != nil {
-		panic(err)
+		return 0, err
 	}
 
-	return result.TotalAwsStorageSize
+	return result.TotalAwsStorageSize, nil
 }
 
 // GetNumberOfMonthlySubs returns the number of customers on the monthly subscription plan.

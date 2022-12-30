@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // InsertUser inserts the given user into the database.
@@ -53,14 +55,19 @@ func UpdateUser(fieldName string, fieldValue interface{}, address string) (bool,
 	// Check if the user exists in the database.
 	if _, err := GetUserByAddress(address); err != nil {
 		return false, err
-	} 
+	}
 
 	filter := bson.D{{Key: "address", Value: address}}
 
 	var update bson.D
 
-	if fieldName == "spool_capacity_used" || fieldName == "aws_capacity_used" || fieldName == "number_files_uploaded" {
-		update = bson.D{{Key: "$inc", Value: bson.D{{Key: fieldName, Value: fieldValue}}}}
+	if fieldName == "spool_capacity_used" || fieldName == "aws_capacity_used" || fieldName == "number_of_files" {
+		if fieldName == "spool_capacity_used" || fieldName == "aws_capacity_used" {
+			update = bson.D{{Key: "$inc", Value: bson.D{{Key: fieldName, Value: fieldValue}}},
+				{Key: "$inc", Value: bson.D{{Key: "number_of_files", Value: 1}}}}
+		} else {
+			update = bson.D{{Key: "$inc", Value: bson.D{{Key: fieldName, Value: fieldValue}}}}
+		}
 
 		if fieldName == "spool_capacity_used" {
 			if ok, err := IncrementStoragePoolUsed(fieldValue.(float64)); err != nil {
@@ -71,8 +78,10 @@ func UpdateUser(fieldName string, fieldValue interface{}, address string) (bool,
 		} else if fieldName == "aws_capacity_used" {
 			if ok, err := IncrementAwsStorageUsed(fieldValue.(float64)); err != nil {
 				return false, err
-			} else if !ok {
-				return false, fmt.Errorf("failed to increment aws storage")
+			} else {
+				if !ok {
+					return false, fmt.Errorf("failed to increment aws storage")
+				}
 			}
 		}
 	} else {
@@ -153,4 +162,36 @@ func GetUserByAddress(address string) (User, error) {
 	}
 
 	return result, nil
+}
+
+func GetUsers(amount int) ([]User, error) {
+	var users []User
+
+	numDocs, err := userDetailsColl.CountDocuments(context.TODO(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+
+	var j int
+	if amount > int(numDocs) {
+		j = int(numDocs)
+	} else {
+		j = amount
+	}
+
+	for i := 0; i < j; i++ {
+		// Generate a random number between 0 and the total number of documents in the collection
+		skip := rand.Intn(int(numDocs))
+
+		// Find a random document by skipping the specified number of documents
+		var user User
+		err = userDetailsColl.FindOne(context.TODO(), bson.M{}, options.FindOne().SetSkip(int64(skip))).Decode(&user)
+		if err != nil {
+			return nil, err
+		}
+
+		users = append(users, user)
+	}
+
+	return users, nil
 }

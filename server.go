@@ -70,6 +70,8 @@ func StartServer() {
 	// Route to manage the users
 	CreateCommandAction("/user", manageUserHandler)
 
+	CreateCommandAction("/users", getUsersHandler)
+
 	for path, action := range RouteCommands {
 		http.HandleFunc(path, action)
 	}
@@ -82,6 +84,26 @@ func StartServer() {
 
 func initialiseStorageStateHandler(w http.ResponseWriter, r *http.Request) {
 	InitialiseNetworkState()
+}
+
+func getUsersHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		queryParams := r.URL.Query()
+		amount := queryParams.Get("amount")
+		if amount == "" {
+			SendResponse(w, false, "amount form key not provided", nil)
+			return
+		}
+
+		amountInt, _ := strconv.Atoi(amount)
+
+		if users, err := GetUsers(amountInt); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			SendResponse(w, true, "Users", users)
+		}
+	}
 }
 
 // manageUserHandler manages the users
@@ -327,66 +349,30 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 			Timezone:        timezone,
 		}
 
-		if inStoragePoolBool {
-			// Increment the storage pool used
-			if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
+		// Increment the storage pool used
+		if err := InsertUploadedFile(uploadedFile); err != nil {
+			SendResponse(w, false, err.Error(), nil)
+		} else {
+			var fieldToUpdate string
+			var successMsg string
+			var failMsg string
+			if inStoragePoolBool {
+				fieldToUpdate = "spool_capacity_used"
+				successMsg = "File upload success (Storage Pool)"
+				failMsg = "File upload success (Storage Pool), error updating user"
+			} else {
+				fieldToUpdate = "aws_capacity_used"
+				successMsg = "File upload success (AWS)"
+				failMsg = "File upload success (AWS), error updating user"
+			}
+
+			if ok, err := UpdateUser(fieldToUpdate, float64(fileSize), uploaderAddress); err != nil {
 				SendResponse(w, false, err.Error(), nil)
 			} else {
 				if ok {
-					if err := InsertUploadedFile(uploadedFile); err != nil {
-						SendResponse(w, false, err.Error(), nil)
-					} else {
-						if ok, err := UpdateUser("number_of_files", 1, uploaderAddress); err != nil {
-							SendResponse(w, false, err.Error(), nil)
-						} else {
-							if ok {
-								if ok, err := UpdateUser("spool_capacity_used", float64(fileSize), uploaderAddress); err != nil {
-									SendResponse(w, false, err.Error(), nil)
-								} else {
-									if ok {
-										SendResponse(w, true, "Storage pool use incremented and File recorded", nil)
-									} else {
-										SendResponse(w, false, "Storage pool use incremented but File not recorded", nil)
-									}
-								}
-							} else {
-								SendResponse(w, false, "error uploading file", nil)
-							}
-						}
-					}
+					SendResponse(w, true, successMsg, nil)
 				} else {
-					SendResponse(w, false, "Storage pool full", nil)
-				}
-			}
-		} else {
-			// Increment the AWS used
-			if ok, err := updateStoragePoolUsed(float64(fileSize)); err != nil {
-				println(err.Error())
-			} else {
-				if ok {
-					if err := InsertUploadedFile(uploadedFile); err != nil {
-						SendResponse(w, false, err.Error(), nil)
-					} else {
-						if ok, err := UpdateUser("number_of_files", 1, uploaderAddress); err != nil {
-							SendResponse(w, false, err.Error(), nil)
-						} else {
-							if ok {
-
-								if ok, err := UpdateUser("aws_capacity_used", float64(fileSize), uploaderAddress); err != nil {
-									SendResponse(w, false, err.Error(), nil)
-								} else {
-									if ok {
-										SendResponse(w, true, "AWS use incremented and File recorded", nil)
-									} else {
-										SendResponse(w, false, "AWS use incremented but File not recorded", nil)
-									}
-								}							} else {
-								SendResponse(w, false, "error uploading file", nil)
-							}
-						}
-					}
-				} else {
-					SendResponse(w, false, "AWS storage full", nil)
+					SendResponse(w, false, failMsg, nil)
 				}
 			}
 		}
@@ -527,10 +513,43 @@ func updateStoragePoolUsed(fileSize float64) (bool, error) {
 	return true, nil
 }
 
+func updateAWSstorageUsed(fileSize float64) (bool, error) {
+	// Update the AWS storage used
+	awsStorageAvailable, err := GetTotalAwsStorageSize()
+	if err != nil {
+		return false, err
+	}
+
+	totalAwsStorageUsed, err := GetTotalAwsStorageUsed()
+	if err != nil {
+		return false, err
+	}
+
+	if awsStorageAvailable-totalAwsStorageUsed <= float64(fileSize) {
+		fmt.Println("AWS storage is full")
+		return false, nil
+	}
+
+	// Increment the AWS storage used
+	if ok, err := IncrementAwsStorageUsed(float64(fileSize)); err != nil {
+		return false, err
+	} else {
+		if !ok {
+			return false, fmt.Errorf("failed to increment AWS storage used")
+		}
+	}
+
+	return true, nil
+}
+
 func getAwsStorageSizeHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		SendResponse(w, true, "Total AWS storage size", GetTotalAwsStorageSize())
+		if size, err := GetTotalAwsStorageSize(); err == nil {
+			SendResponse(w, true, "Total AWS storage size", size)
+		} else {
+			SendResponse(w, false, err.Error(), nil)
+		}
 
 	case "POST":
 		r.ParseForm()
