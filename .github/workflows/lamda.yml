@@ -24,10 +24,10 @@ jobs:
           aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws_region: ${{ secrets.AWS_REGION }}
-          function_name: gorush
+          function_name: ShrCoordinatorServer
           zip_file: deployment.zip
           memory_size: 128
           timeout: 10
           handler: foobar
-          role: arn:aws:iam::xxxxxxxxxxx:role/test1234
+          role: arn:aws:iam::xxxxxxxxxxx:role/chris_ineg
           runtime: nodejs12.x
