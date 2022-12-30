@@ -25,8 +25,8 @@ jobs:
           aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws_region: eu-west-2
           zip_file: deployment.zip
-          function_name: StartServer
-          # handler: StartServer
+          function_name: ShrCoordinatorServer
+          handler: StartServer
           role: arn:aws:iam::618787646995:user/chris_ineg
           runtime: go1.x
           memory_size: 128
