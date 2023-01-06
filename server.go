@@ -109,6 +109,7 @@ func getUsersHandler(w http.ResponseWriter, r *http.Request) {
 // manageUserHandler manages the users
 func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
+		log.Println(r.Method)
 
 	switch r.Method {
 	case "GET":
