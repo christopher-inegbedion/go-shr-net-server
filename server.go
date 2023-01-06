@@ -159,6 +159,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "POST":
+		log.Println("POST request received")
 		address := r.FormValue("address")
 		userName := r.FormValue("user_name")
 		timezone := r.FormValue("timezone")
