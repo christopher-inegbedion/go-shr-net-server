@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/fatih/structs"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -109,20 +110,34 @@ func getUsersHandler(w http.ResponseWriter, r *http.Request) {
 // manageUserHandler manages the users
 func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-		log.Println(r.Method)
+	log.Println(r.Method)
 
 	switch r.Method {
 	case "GET":
 		queryParams := r.URL.Query()
-		address := queryParams.Get("address")
-		if address == "" {
+		username := queryParams.Get("user_name")
+		fieldName := queryParams.Get("field_name")
+
+		if username == "" {
 			SendResponse(w, false, "address form key not provided", nil)
 			return
 		}
 
-		if user, err := GetUserByAddress(address); err != nil {
+		if user, err := GetUserByUsername(username); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
+			if fieldName != "" {
+				userMap := structs.Map(user)
+
+				result := userMap[fieldName]
+				if result == nil {
+					SendResponse(w, false, "Field name not found", nil)
+					return
+				}
+				SendResponse(w, true, "User details", result)
+				return
+			}
+
 			SendResponse(w, true, "User details", user)
 		}
 
@@ -281,18 +296,18 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 		inStoragePool := r.FormValue("in_storage_pool")
 		hosts := r.FormValue("hosts")
 		shards := r.FormValue("shards")
-		uploaderAddress := r.FormValue("uploader_address")
+		uploaderUsername := r.FormValue("uploader_username")
 		backupShards := r.FormValue("backup_shards")
 		isMonthlySub := r.FormValue("is_monthly_sub")
 		timezone := r.FormValue("timezone")
 
-		if fileName == "" || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderAddress == "" || isMonthlySub == "" || timezone == "" {
+		if fileName == "" || uploadDate == 0 || inStoragePool == "" || hosts == "" || uploaderUsername == "" || isMonthlySub == "" || timezone == "" {
 			SendResponse(w, false, "Invalid parameters", nil)
 			return
 		}
 
 		// Check if the user exists
-		if _, err := GetUserByAddress(uploaderAddress); err != nil {
+		if _, err := GetUserByUsername(uploaderUsername); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 			panic(err)
 			return
@@ -339,16 +354,16 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		uploadedFile := UploadedFile{
-			FileName:        fileName,
-			FileSize:        float64(fileSize),
-			UploadDate:      uploadDate,
-			InStoragePool:   inStoragePoolBool,
-			Hosts:           hosts2D,
-			Shards:          shardsInt,
-			UploaderAddress: uploaderAddress,
-			BackupShards:    backupShardsInt,
-			IsMonthlySub:    isMonthlySubBool,
-			Timezone:        timezone,
+			FileName:         fileName,
+			FileSize:         float64(fileSize),
+			UploadDate:       uploadDate,
+			InStoragePool:    inStoragePoolBool,
+			Hosts:            hosts2D,
+			Shards:           shardsInt,
+			UploaderUsername: uploaderUsername,
+			BackupShards:     backupShardsInt,
+			IsMonthlySub:     isMonthlySubBool,
+			Timezone:         timezone,
 		}
 
 		// Increment the storage pool used
@@ -368,7 +383,7 @@ func recordFileHandler(w http.ResponseWriter, r *http.Request) {
 				failMsg = "File upload success (AWS), error updating user"
 			}
 
-			if ok, err := UpdateUser(fieldToUpdate, float64(fileSize), uploaderAddress); err != nil {
+			if ok, err := UpdateUser(fieldToUpdate, float64(fileSize), uploaderUsername); err != nil {
 				SendResponse(w, false, err.Error(), nil)
 			} else {
 				if ok {

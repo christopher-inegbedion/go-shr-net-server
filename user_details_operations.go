@@ -13,7 +13,7 @@ import (
 // InsertUser inserts the given user into the database.
 func InsertUser(user User) (bool, error) {
 	// Check if the user already exists in the database.
-	if _, err := GetUserByAddress(user.Address); err == nil {
+	if _, err := GetUserByUsername(user.UserName); err == nil {
 		return false, fmt.Errorf("user already exists")
 	}
 
@@ -51,13 +51,13 @@ func InsertUser(user User) (bool, error) {
 }
 
 // UpdateUser updates the user with the given address.
-func UpdateUser(fieldName string, fieldValue interface{}, address string) (bool, error) {
+func UpdateUser(fieldName string, fieldValue interface{}, username string) (bool, error) {
 	// Check if the user exists in the database.
-	if _, err := GetUserByAddress(address); err != nil {
+	if _, err := GetUserByUsername(username); err != nil {
 		return false, err
 	}
 
-	filter := bson.D{{Key: "address", Value: address}}
+	filter := bson.D{{Key: "user_name", Value: username}}
 
 	var update bson.D
 
@@ -95,11 +95,11 @@ func UpdateUser(fieldName string, fieldValue interface{}, address string) (bool,
 	}
 }
 
-// DeleteUser deletes the user with the given address.
+// DeleteUser deletes the user with the given username.
 func DeleteUser(address string) (bool, error) {
-	filter := bson.D{{Key: "address", Value: address}}
+	filter := bson.D{{Key: "user_name", Value: address}}
 
-	if user, err := GetUserByAddress(address); err != nil {
+	if user, err := GetUserByUsername(address); err != nil {
 		return false, err
 	} else {
 		if _, err := userDetailsColl.DeleteOne(context.Background(), filter); err != nil {
@@ -150,9 +150,9 @@ func DeleteUser(address string) (bool, error) {
 	}
 }
 
-// GetUserByAddress returns the user with the given address.
-func GetUserByAddress(address string) (User, error) {
-	filter := bson.D{{Key: "address", Value: address}}
+// GetUserByUsername returns the user with the given address.
+func GetUserByUsername(username string) (User, error) {
+	filter := bson.D{{Key: "user_name", Value: username}}
 
 	var result User
 	if err := userDetailsColl.FindOne(context.Background(), filter).Decode(&result); err != nil {
