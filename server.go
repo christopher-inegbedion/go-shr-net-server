@@ -102,6 +102,11 @@ func getUsersHandler(w http.ResponseWriter, r *http.Request) {
 		if users, err := GetUsers(amountInt); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
+			if len(users) == 0 {
+				SendResponse(w, false, "No users found", nil)
+				return
+			}
+
 			SendResponse(w, true, "Users", users)
 		}
 	}
@@ -188,6 +193,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 			SendResponse(w, false, "Invalid parameters", nil)
 			return
 		}
+		log.Println("POST request received")
 
 		if accountType != MONTHLY_SUB && accountType != FIXED_AMOUNT_1 && accountType != FIXED_AMOUNT_2 {
 			SendResponse(w, false, fmt.Sprintf("Invalid account type [%v]", accountType), nil)
@@ -206,11 +212,15 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 
 		if ok, err := InsertUser(user); err != nil {
 			SendResponse(w, false, err.Error(), nil)
+			log.Println("User not added")
 		} else {
 			if ok {
-				SendResponse(w, true, "User added", nil)
+				SendResponse(w, true, "User added", userName)
+				log.Println("User added")
 			} else {
-				SendResponse(w, false, "User not inserted", nil)
+				SendResponse(w, false, "User not added", nil)
+				log.Println("User not added")
+
 			}
 		}
 	case "DELETE":
