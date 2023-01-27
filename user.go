@@ -2,6 +2,7 @@ package main
 
 type User struct {
 	Address           string `bson:"address"`
+	RelayAddress      string `bson:"relay_address"`
 	UserName          string `bson:"user_name"`
 	Timezone          string `bson:"timezone"`
 	AccountType       string `bson:"account_type"`

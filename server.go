@@ -147,11 +147,11 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "PUT":
-		address := r.FormValue("address")
+		username := r.FormValue("user_name")
 		fieldName := r.FormValue("field_name")
 		fieldValue := r.FormValue("field_value")
 
-		if address == "" || fieldName == "" || fieldValue == "" {
+		if username == "" || fieldName == "" || fieldValue == "" {
 			SendResponse(w, false, "Invalid parameters", nil)
 			return
 		}
@@ -169,7 +169,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 			value = int(value.(int))
 		}
 
-		if ok, err := UpdateUser(fieldName, value, address); err != nil {
+		if ok, err := UpdateUser(fieldName, value, username); err != nil {
 			SendResponse(w, false, err.Error(), nil)
 		} else {
 			if ok {
@@ -182,6 +182,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		log.Println("POST request received")
 		address := r.FormValue("address")
+		relayAddress := r.FormValue("relay_address")
 		userName := r.FormValue("user_name")
 		timezone := r.FormValue("timezone")
 		accountType := r.FormValue("account_type")
@@ -189,7 +190,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 		awsCapacityUsed, _ := strconv.Atoi(r.FormValue("aws_capacity_used"))
 		numFilesUploaded, _ := strconv.Atoi(r.FormValue("num_files_uploaded"))
 
-		if address == "" || userName == "" || timezone == "" || accountType == "" {
+		if relayAddress == "" || address == "" || userName == "" || timezone == "" || accountType == "" {
 			SendResponse(w, false, "Invalid parameters", nil)
 			return
 		}
@@ -202,6 +203,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 
 		user := User{
 			Address:           address,
+			RelayAddress: relayAddress,
 			UserName:          userName,
 			Timezone:          timezone,
 			AccountType:       accountType,
