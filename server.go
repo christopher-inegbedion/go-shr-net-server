@@ -124,7 +124,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 		fieldName := queryParams.Get("field_name")
 
 		if username == "" {
-			SendResponse(w, false, "address form key not provided", nil)
+			SendResponse(w, false, "Please provide a username", nil)
 			return
 		}
 
@@ -190,7 +190,7 @@ func manageUserHandler(w http.ResponseWriter, r *http.Request) {
 		awsCapacityUsed, _ := strconv.Atoi(r.FormValue("aws_capacity_used"))
 		numFilesUploaded, _ := strconv.Atoi(r.FormValue("num_files_uploaded"))
 
-		if relayAddress == "" || address == "" || userName == "" || timezone == "" || accountType == "" {
+		if address == "" || userName == "" || timezone == "" || accountType == "" {
 			SendResponse(w, false, "Invalid parameters", nil)
 			return
 		}
